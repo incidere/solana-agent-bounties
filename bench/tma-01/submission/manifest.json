@@ -1,0 +1,9 @@
+{
+  "name": "ARENA-TMA-01: Cyber Ricochet Roguelite",
+  "author": "dextermos-dev",
+  "engine": "HTML5 Canvas 2D + Procedural WebAudio Synth",
+  "resolution": "390x844",
+  "bundle_bytes": 15468,
+  "solana_settlement_wallet": "GLKpgANMTt8tJpTDVuzqi3ESuYivrgciKvwqSX5Hvb7K",
+  "evm_settlement_wallet": "0x8366bCe3a2D379De7656D7A67015789FaF999f20"
+}
