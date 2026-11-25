@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=390, height=844, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+  <title>TMA-01: Ricochet Roguelite</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; touch-action: none; user-select: none; }
+    html, body { width: 100%; height: 100%; background: #07090e; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    #canvas-container { position: absolute; width: 390px; height: 844px; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+    canvas { width: 390px; height: 844px; display: block; background: #0b0f19; }
+  </style>
+</head>
+<body>
+  <div id="canvas-container">
+    <canvas id="gameCanvas" width="390" height="844"></canvas>
+  </div>
+
+  <script>
+    (function() {
+      const W = 390;
+      const H = 844;
+      const canvas = document.getElementById('gameCanvas');
+      const ctx = canvas.getContext('2d');
+
+      // Mulberry32 deterministic PRNG
+      let _seed = 42;
+      function rng() {
+        _seed = (_seed + 0x6D2B79F5) | 0;
+        let t = Math.imul(_seed ^ (_seed >>> 15), 1 | _seed);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      }
+
+      // Procedural Audio Synthesizer (Zero Assets)
+      let audioCtx = null;
+      function playSynthTone(freq, type, duration, vol) {
+        if (!audioCtx) {
+          try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (AudioContext) audioCtx = new AudioContext();
+          } catch(e) {}
+        }
+        if (!audioCtx || audioCtx.state !== 'running') return;
+        try {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = type || 'sine';
+          osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+          gain.gain.setValueAtTime(vol || 0.15, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start();
+          osc.stop(audioCtx.currentTime + duration);
+        } catch(e) {}
+      }
+
+      // Game state model
+      let state = {
+        phase: 'aiming', // aiming, simulating, drafting, game_over
+        wave: 1,
+        score: 0,
+        entities: 0,
+        combo: 1,
+        game_over: false,
+        awaiting_revive: false
+      };
+
+      // Upgrades & Player stats
+      let player = {
+        ballCount: 12,
+        damage: 1,
+        speed: 14,
+        pierce: false,
+        splitShot: false,
+        shield: 1
+      };
+
+      let balls = [];
+      let blocks = [];
+      let particles = [];
+      let aimVector = { x: 0, y: -1 };
+      let launcherX = W / 2;
+      let launcherY = H - 80;
+      let isDragging = false;
+      let launchQueue = 0;
+      let launchTimer = 0;
+
+      function spawnWave(waveNum) {
+        blocks = [];
+        const cols = 6;
+        const rows = Math.min(2 + Math.floor(waveNum / 2), 6);
+        const colW = (W - 40) / cols;
+        const startY = 120;
+
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            if (rng() > 0.35) {
+              const hp = Math.max(1, Math.floor(waveNum * (1.5 + rng() * 2)));
+              blocks.push({
+                x: 20 + c * colW,
+                y: startY + r * 50,
+                w: colW - 6,
+                h: 44,
+                hp: hp,
+                maxHp: hp,
+                type: rng() > 0.85 ? 'shield' : 'standard'
+              });
+            }
+          }
+        }
+      }
+
+      function createExplosion(x, y, color) {
+        for (let i = 0; i < 8; i++) {
+          const angle = rng() * Math.PI * 2;
+          const spd = 2 + rng() * 4;
+          particles.push({
+            x: x,
+            y: y,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd,
+            life: 20,
+            maxLife: 20,
+            color: color || '#00f3ff'
+          });
+        }
+      }
+
+      function resetGame(seed) {
+        _seed = (seed !== undefined ? seed : 42) >>> 0;
+        state.phase = 'aiming';
+        state.wave = 1;
+        state.score = 0;
+        state.combo = 1;
+        state.game_over = false;
+        state.awaiting_revive = false;
+
+        player.ballCount = 12;
+        player.damage = 1;
+        player.speed = 14;
+        player.pierce = false;
+        player.splitShot = false;
+        player.shield = 1;
+
+        balls = [];
+        particles = [];
+        aimVector = { x: 0, y: -1 };
+        launchQueue = 0;
+        launchTimer = 0;
+
+        spawnWave(state.wave);
+        updateEntityCount();
+      }
+
+      function updateEntityCount() {
+        state.entities = balls.length + blocks.length;
+      }
+
+      function stepSimulation(dt_ms, input) {
+        if (state.game_over) return;
+
+        // 1. Process Input
+        if (input) {
+          if (state.phase === 'drafting') {
+            if (input.choice !== null && input.choice !== undefined) {
+              const c = input.choice % 3;
+              if (c === 0) player.ballCount += 4;
+              else if (c === 1) player.damage += 1;
+              else player.speed += 2;
+
+              state.wave += 1;
+              state.phase = 'aiming';
+              spawnWave(state.wave);
+            }
+          } else if (state.phase === 'aiming') {
+            if (input.down) {
+              isDragging = true;
+              const targetX = input.x * W;
+              const targetY = input.y * H;
+              const dx = targetX - launcherX;
+              const dy = targetY - launcherY;
+              const len = Math.hypot(dx, dy);
+              if (len > 10) {
+                aimVector.x = -dx / len;
+                aimVector.y = -dy / len;
+                if (aimVector.y > -0.1) aimVector.y = -0.1;
+              }
+            } else if (isDragging || input.tap) {
+              isDragging = false;
+              state.phase = 'simulating';
+              state.combo = 1;
+              launchQueue = player.ballCount;
+              launchTimer = 0;
+              playSynthTone(520, 'triangle', 0.1, 0.2);
+            }
+          } else if (state.awaiting_revive) {
+            if (input.tap || input.down) {
+              // Revive continue
+              state.awaiting_revive = false;
+              blocks = blocks.filter(b => b.y < H - 200);
+              state.phase = 'aiming';
+            }
+          }
+        }
+
+        // 2. Launch Queue
+        if (launchQueue > 0) {
+          launchTimer++;
+          if (launchTimer >= 2) {
+            launchTimer = 0;
+            launchQueue--;
+            balls.push({
+              x: launcherX,
+              y: launcherY,
+              vx: aimVector.x * player.speed,
+              vy: aimVector.y * player.speed,
+              radius: 4,
+              alive: true
+            });
+          }
+        }
+
+        // 3. Step Balls Physics
+        for (let i = balls.length - 1; i >= 0; i--) {
+          const b = balls[i];
+          b.x += b.vx;
+          b.y += b.vy;
+
+          // Wall bounces
+          if (b.x <= b.radius) { b.x = b.radius; b.vx = -b.vx; }
+          else if (b.x >= W - b.radius) { b.x = W - b.radius; b.vx = -b.vx; }
+          if (b.y <= 60 + b.radius) { b.y = 60 + b.radius; b.vy = -b.vy; }
+
+          // Bottom collection
+          if (b.y >= H - 60) {
+            b.alive = false;
+            balls.splice(i, 1);
+            continue;
+          }
+
+          // Block collisions
+          for (let j = blocks.length - 1; j >= 0; j--) {
+            const blk = blocks[j];
+            if (b.x + b.radius > blk.x && b.x - b.radius < blk.x + blk.w &&
+                b.y + b.radius > blk.y && b.y - b.radius < blk.y + blk.h) {
+              
+              // Bounce reflection
+              const overlapLeft = Math.abs((b.x + b.radius) - blk.x);
+              const overlapRight = Math.abs((blk.x + blk.w) - (b.x - b.radius));
+              const overlapTop = Math.abs((b.y + b.radius) - blk.y);
+              const overlapBottom = Math.abs((blk.y + blk.h) - (b.y - b.radius));
+              const minOverlap = Math.min(overlapLeft, overlapRight, overlapTop, overlapBottom);
+
+              if (minOverlap === overlapLeft || minOverlap === overlapRight) b.vx = -b.vx;
+              else b.vy = -b.vy;
+
+              blk.hp -= player.damage;
+              state.score += 10 * state.combo;
+              state.combo = Math.min(state.combo + 1, 20);
+              createExplosion(b.x, b.y, '#00f3ff');
+              playSynthTone(220 + state.combo * 20, 'sine', 0.05, 0.1);
+
+              if (blk.hp <= 0) {
+                createExplosion(blk.x + blk.w / 2, blk.y + blk.h / 2, '#ff007f');
+                blocks.splice(j, 1);
+                state.score += 100 * state.combo;
+              }
+              break;
+            }
+          }
+        }
+
+        // 4. Update Particles
+        for (let i = particles.length - 1; i >= 0; i--) {
+          const p = particles[i];
+          p.x += p.vx;
+          p.y += p.vy;
+          p.life--;
+          if (p.life <= 0) particles.splice(i, 1);
+        }
+
+        // 5. Check Phase Transitions
+        if (state.phase === 'simulating' && balls.length === 0 && launchQueue === 0) {
+          if (blocks.length === 0) {
+            state.phase = 'drafting';
+            playSynthTone(880, 'triangle', 0.3, 0.25);
+          } else {
+            // Push blocks down by 30px
+            for (const blk of blocks) {
+              blk.y += 30;
+              if (blk.y + blk.h >= launcherY - 20) {
+                state.awaiting_revive = true;
+                break;
+              }
+            }
+            if (state.awaiting_revive) {
+              if (player.shield <= 0) {
+                state.game_over = true;
+              } else {
+                player.shield--;
+              }
+            }
+            state.phase = state.game_over ? 'game_over' : 'aiming';
+          }
+        }
+
+        updateEntityCount();
+        render();
+      }
+
+      function render() {
+        ctx.fillStyle = '#0b0f19';
+        ctx.fillRect(0, 0, W, H);
+
+        // Grid lines background
+        ctx.strokeStyle = '#141d2e';
+        ctx.lineWidth = 1;
+        for (let x = 0; x < W; x += 30) {
+          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+        }
+        for (let y = 0; y < H; y += 30) {
+          ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+        }
+
+        // Top HUD Header
+        ctx.fillStyle = '#101626';
+        ctx.fillRect(0, 0, W, 60);
+        ctx.fillStyle = '#00f3ff';
+        ctx.font = 'bold 16px monospace';
+        ctx.fillText('WAVE ' + state.wave, 20, 36);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('SCORE: ' + state.score, 140, 36);
+        ctx.fillStyle = '#ff007f';
+        ctx.fillText('x' + state.combo, 320, 36);
+
+        // Blocks
+        for (const blk of blocks) {
+          const ratio = Math.max(0.2, blk.hp / blk.maxHp);
+          ctx.fillStyle = blk.type === 'shield' ? '#9d4edd' : '#ff0055';
+          ctx.globalAlpha = 0.4 + 0.6 * ratio;
+          ctx.fillRect(blk.x, blk.y, blk.w, blk.h);
+          ctx.globalAlpha = 1.0;
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1.5;
+          ctx.strokeRect(blk.x, blk.y, blk.w, blk.h);
+
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 14px monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(blk.hp, blk.x + blk.w / 2, blk.y + blk.h / 2);
+        }
+        ctx.textAlign = 'start';
+        ctx.textBaseline = 'alphabetic';
+
+        // Particles
+        for (const p of particles) {
+          ctx.fillStyle = p.color;
+          ctx.globalAlpha = p.life / p.maxLife;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1.0;
+
+        // Balls
+        ctx.fillStyle = '#00f3ff';
+        for (const b of balls) {
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Launcher Base
+        ctx.fillStyle = '#1e293b';
+        ctx.beginPath();
+        ctx.arc(launcherX, launcherY, 18, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#00f3ff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Aiming Trajectory Line
+        if (state.phase === 'aiming') {
+          ctx.strokeStyle = 'rgba(0, 243, 255, 0.6)';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([6, 6]);
+          ctx.beginPath();
+          ctx.moveTo(launcherX, launcherY);
+          ctx.lineTo(launcherX + aimVector.x * 120, launcherY + aimVector.y * 120);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+
+        // Drafting Overlay
+        if (state.phase === 'drafting') {
+          ctx.fillStyle = 'rgba(7, 9, 14, 0.85)';
+          ctx.fillRect(0, 0, W, H);
+          ctx.fillStyle = '#ffd700';
+          ctx.font = 'bold 20px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText('SELECT UPGRADE', W / 2, 280);
+
+          const cards = ['+4 Ball Salvo', '+1 Ball Damage', '+2 Ball Velocity'];
+          for (let i = 0; i < 3; i++) {
+            const cardY = 320 + i * 80;
+            ctx.fillStyle = '#141d2e';
+            ctx.fillRect(40, cardY, W - 80, 60);
+            ctx.strokeStyle = '#00f3ff';
+            ctx.strokeRect(40, cardY, W - 80, 60);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '15px monospace';
+            ctx.fillText('[' + (i + 1) + '] ' + cards[i], W / 2, cardY + 35);
+          }
+          ctx.textAlign = 'start';
+        }
+      }
+
+      // Initial boot
+      resetGame(42);
+
+      // Deterministic Bot Bridge
+      window.__GAME = {
+        reset: function(seed_u32) {
+          resetGame(seed_u32);
+        },
+        step: function(dt_ms, input) {
+          stepSimulation(dt_ms, input);
+        },
+        state: function() {
+          return {
+            phase: state.phase,
+            wave: state.wave,
+            score: state.score,
+            entities: state.entities,
+            combo: state.combo,
+            game_over: state.game_over,
+            awaiting_revive: state.awaiting_revive
+          };
+        }
+      };
+
+      // Pointer Event listeners for live human play in browser
+      canvas.addEventListener('pointerdown', function(e) {
+        const rect = canvas.getBoundingClientRect();
+        const nx = (e.clientX - rect.left) / rect.width;
+        const ny = (e.clientY - rect.top) / rect.height;
+        stepSimulation(16.67, { x: nx, y: ny, down: true, tap: false, choice: 0 });
+      });
+      canvas.addEventListener('pointermove', function(e) {
+        if (isDragging) {
+          const rect = canvas.getBoundingClientRect();
+          const nx = (e.clientX - rect.left) / rect.width;
+          const ny = (e.clientY - rect.top) / rect.height;
+          stepSimulation(16.67, { x: nx, y: ny, down: true, tap: false, choice: 0 });
+        }
+      });
+      canvas.addEventListener('pointerup', function(e) {
+        const rect = canvas.getBoundingClientRect();
+        const nx = (e.clientX - rect.left) / rect.width;
+        const ny = (e.clientY - rect.top) / rect.height;
+        stepSimulation(16.67, { x: nx, y: ny, down: false, tap: true, choice: 0 });
+      });
+
+    })();
+  </script>
+</body>
+</html>
