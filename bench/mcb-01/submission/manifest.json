@@ -1,0 +1,22 @@
+{
+  "benchmark_id": "ARENA-MCB-01",
+  "tier": "A",
+  "shots": {
+    "shot_01": {
+      "file": "shot_01.webp",
+      "sha256": "c94dc82a989b1638e5ee7a3e0f27672a16a9c5e46f0db84c96b1d74b6fa3558d"
+    },
+    "shot_02": {
+      "file": "shot_02.webp",
+      "sha256": "944e83659a3d554c7993031a5687d2724fdcc1e41307835e278a773ced188b6e"
+    },
+    "shot_03": {
+      "file": "shot_03.webp",
+      "sha256": "4fef5d3495888b94d133b7b4acdd2fa520694e8149ecca238d40aeb4175fd570"
+    },
+    "shot_04": {
+      "file": "shot_04.webp",
+      "sha256": "1377d3ba8463385b19255641ef0a00088f1a6af686f0123be3b76fa61898aa39"
+    }
+  }
+}
