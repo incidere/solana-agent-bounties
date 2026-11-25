@@ -1,0 +1,19 @@
+{
+  "benchmark_id": "ARENA-TMA-01",
+  "viewport": {"width": 390, "height": 844, "aspect": "9:16 mobile portrait", "input": "single-thumb pointer/touch unified"},
+  "caps": {"max_bundle_bytes": 262144, "network": "strictly zero http:// or https:// references"},
+  "mechanics": [
+    "Instant <1.5s zero-tutorial hook: drag-aim & release physics ricochet / drop-merge chain combos against numbered/destructible hazards",
+    "Between-wave 3-card roguelite upgrade draft (split-shot, gravity well, chain lightning, magnet, shield) scaling through Wave 10+",
+    "Procedural game-feel juice: hit-stop, screen-shake, floating combo damage numbers, and zero-asset WebAudio procedural synth SFX",
+    "Near-miss revive hook: awaiting_revive state on defeat allowing 1 extra shield/bomb continue (ready for Mini-App Stars / standalone play)"
+  ],
+  "deterministic_bridge": {
+    "global": "window.__GAME",
+    "methods": {
+      "reset(seed_u32)": "Reset PRNG and arena deterministically with zero Math.random() drift",
+      "step(dt_ms, {x, y, down, tap, choice})": "Advance simulation by dt_ms (16.67ms) and draw to <canvas>",
+      "state()": "Return {phase, wave, score, entities, combo, game_over, awaiting_revive}"
+    }
+  }
+}
