@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "probe_ctrl",
+]
+resolver = "2"

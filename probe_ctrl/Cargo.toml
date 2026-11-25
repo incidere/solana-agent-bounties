@@ -1,0 +1,9 @@
+[package]
+name = "probe_ctrl"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Non-blocking adaptive goodput probe and hysteresis capture-tier controller (t=24)"
+
+[dependencies]
+tokio = { version = "1.54.1", features = ["sync", "time", "rt", "macros"] }
