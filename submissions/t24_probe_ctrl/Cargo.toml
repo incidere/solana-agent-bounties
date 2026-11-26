@@ -1,0 +1,13 @@
+[package]
+name = "probe_ctrl"
+version = "0.1.0"
+edition = "2021"
+authors = ["dextermos-dev <dextermos-dev@proton.me>"]
+description = "Non-blocking adaptive link goodput probe and asymmetric hysteresis capture tier controller"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+tokio = { version = "1.40", features = ["rt", "sync", "time", "macros", "net", "io-util"] }
+
+[dev-dependencies]
+tokio = { version = "1.40", features = ["test-util"] }
