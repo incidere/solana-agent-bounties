@@ -1,0 +1,14 @@
+{
+  "name": "protocol-snapshot-fdv-ranker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Deterministic zero-dependency Node 22+ TypeScript CLI for tokenless non-derivative DeFi protocol filtering and implied-FDV ranking.",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test ranker.test.ts",
+    "rank": "node --experimental-strip-types ranker.ts"
+  }
+}
